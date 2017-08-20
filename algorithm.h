@@ -5,182 +5,230 @@
 
 namespace cexpr {
 
-template<typename T, size_t size>
-constexpr bool all_of(
-  const std::array<T, size>& input,
-  bool(*predicate)(const T&)) {
-  for(int i = 0; i < size; i++) {
-    if (!predicate(input[i])) {
+template <typename ForwardIterator, typename UnaryOp>
+constexpr bool all_of(ForwardIterator begin, ForwardIterator end, UnaryOp op) {
+  while (begin != end) {
+    if (!op(*begin)) {
       return false;
     }
+    begin++;
   }
   return true;
 }
 
-template<typename T, size_t size>
-constexpr bool any_of(
-  const std::array<T, size>& input,
-  bool(*predicate)(const T&)) {
-  for(int i = 0; i < size; i++) {
-    if (predicate(input[i])) {
+template <typename ForwardIterator, typename UnaryOp>
+constexpr bool any_of(ForwardIterator begin, ForwardIterator end, UnaryOp op) {
+  while (begin != end) {
+    if (op(*begin)) {
       return true;
     }
+    begin++;
   }
   return false;
 }
 
-template<typename T, size_t size>
-constexpr bool none_of(
-  const std::array<T, size>& input,
-  bool(*predicate)(const T&)) {
-  return !any_of(input, predicate);
+template <typename ForwardIterator, typename UnaryOp>
+constexpr bool none_of(ForwardIterator begin, ForwardIterator end, UnaryOp op) {
+  return !any_of(begin, end, op);
 }
 
 // this foreach is slightly difference, since input is
 // immutable in constexpr setting we need to do a copy
-template<size_t N, typename UnaryOp, typename T, size_t size>
-constexpr std::array<
-	typename std::result_of<UnaryOp(const T&)>::type,
-	size>
-for_each_n(
-  const std::array<T, size>& cinput,
-	UnaryOp unaryOp) {
+template <
+    size_t N, typename UnaryOp, typename ForwardIterator,
+    typename T = typename std::iterator_traits<ForwardIterator>::value_type>
+constexpr std::array<typename std::result_of<UnaryOp(const T&)>::type, N>
+for_each_n(ForwardIterator begin, ForwardIterator end, UnaryOp unaryOp) {
+  std::array<typename std::result_of<UnaryOp(const T&)>::type, N> output{};
 
-	std::array<typename std::result_of<UnaryOp(const T&)>::type, N> output{};
-
-  for (int i = 0; i < N; i++) {
+  for (int i = 0; i < N && begin != end; i++, begin++) {
     auto& ref = getRef(output, i);
-    ref = unaryOp(cinput[i]);
-  } 
+    ref = unaryOp(*begin);
+  }
   return output;
 }
 
-template<typename UnaryOp, typename T, size_t size>
-constexpr std::array<
-	typename std::result_of<UnaryOp(const T&)>::type,
-	size>
-for_each(
-  const std::array<T, size>& cinput,
-	UnaryOp unaryOp) {
-  return for_each_n<size>(cinput, unaryOp);
+template <
+    size_t size, typename UnaryOp, typename ForwardIterator,
+    typename T = typename std::iterator_traits<ForwardIterator>::value_type>
+constexpr std::array<typename std::result_of<UnaryOp(const T&)>::type, size>
+for_each(ForwardIterator begin, ForwardIterator end, UnaryOp unaryOp) {
+  return for_each_n<size>(begin, end, unaryOp);
 }
 
-template<typename T, size_t size>
-constexpr size_t count(
-  const std::array<T, size>& cinput,
-  const T& val) {
+template <typename T, size_t size, typename UnaryOp,
+          typename Out = typename std::result_of<UnaryOp(const T&)>::type>
+constexpr std::array<Out, size> for_each_array(
+    const std::array<T, size>& cinput, UnaryOp unaryOp) {
+  return for_each<size>(cinput.begin(), cinput.end(), unaryOp);
+}
 
+template <typename UnaryOp, typename T, size_t size>
+void for_each(const std::array<T, size>& cinput, UnaryOp unaryOp) {
+  return for_each_n<size>(cinput.cbegin(), cinput.cend(), unaryOp);
+}
+
+template <typename ForwardIterator, typename T>
+constexpr size_t count(
+  ForwardIterator begin, ForwardIterator end, const T& val) {
   size_t cnt = 0;
-  for (int i = 0; i < size; i++) {
-    cnt += cinput[i] == val;
-  } 
+  for (; begin != end; begin++) {
+    cnt += *begin == val;
+  }
   return cnt;
 }
 
 // mismatch cannot be implemented because iterator is currently
 // not constexpr
 
-template<typename T, size_t size>
-constexpr bool equal(
-  const std::array<T, size>& lhs,
-  const std::array<T, size>& rhs,
-  bool(*binaryPredicate)(const T&, const T&)) {
-  
-  for (int i = 0; i < size; i++) {
-    if (!binaryPredicate(lhs[i], rhs[i])) {
+template <typename ForwardIterator, typename BinaryPredicate>
+constexpr bool equal(ForwardIterator lBegin,
+                     ForwardIterator lEnd, ForwardIterator rBegin,
+                     ForwardIterator rEnd,
+                     BinaryPredicate binaryPredicate) {
+  for (; lBegin != lEnd && rBegin != rEnd; lBegin++, rBegin++) {
+    if (!binaryPredicate(*lBegin, *rBegin)) {
       return false;
     }
-  } 
-  return true; 
+  }
+  // if they did not run to the end together, then they are not equal
+  return lBegin == lEnd && rBegin == rEnd;
 }
 
-template<typename T, size_t size>
-constexpr bool equal(
-  const std::array<T, size>& lhs,
-  const std::array<T, size>& rhs) {
-  
-  for (int i = 0; i < size; i++) {
-    if (lhs[i] != rhs[i]) {
-      return false;
-    }
-  } 
-  return true; 
+template <typename ForwardIterator>
+constexpr bool equal(ForwardIterator lBegin,
+                     ForwardIterator lEnd, ForwardIterator rBegin,
+                     ForwardIterator rEnd) {
+  using T = typename std::iterator_traits<ForwardIterator>::value_type;
+  return equal(lBegin, lEnd, rBegin, rEnd, [](const T& lhs, const T& rhs) {
+    return lhs == rhs; 
+  });
 }
 
 // for find_if we will return index, otherwise return size
-template<typename T, size_t size>
-constexpr size_t find_if(
-  const std::array<T, size>& input,
-  bool(*predicate)(const T&)) {
-
-  for (int i = 0; i < size; i++) {
-    if (predicate(input[i])) {
-      return i;
+template <typename ForwardIterator, typename UnaryPredicate>
+constexpr ForwardIterator find_if(
+  ForwardIterator begin,
+  ForwardIterator end,
+  UnaryPredicate predicate) {
+  for (; begin != end; begin++) {
+    if (predicate(*begin)) {
+      return begin;
     }
   }
-  return size;
+  return end;
 }
 
-// if I can figure out how to chain functions in constexpr 
-template<typename T, size_t size>
-constexpr size_t find_not_if(
-  const std::array<T, size>& input,
-  bool(*predicate)(const T&)) {
+template<typename Predicate, typename T>
+struct UnaryPredicateNegation {
+  constexpr UnaryPredicateNegation(Predicate predicate): predicate_(predicate) {}
 
-  for (int i = 0; i < size; i++) {
-    if (!predicate(input[i])) {
-      return i;
-    }
+  constexpr bool operator()(const T& val) {
+    return !predicate_(val);
   }
-  return size;
+
+  Predicate predicate_;
+};
+
+// if I can figure out how to chain functions in constexpr
+template <typename ForwardIterator, typename UnaryPredicate>
+constexpr ForwardIterator find_nof_if(
+  ForwardIterator begin,
+  ForwardIterator end,
+  UnaryPredicate predicate) {
+  using T = typename std::iterator_traits<ForwardIterator>::value_type;
+  return find_if(begin, end, UnaryPredicateNegation<UnaryPredicate, T>(predicate));
 }
 
 // did not implement find_end
 
-template<typename T, size_t size>
-constexpr size_t adjacent_find(const std::array<T, size>& input) {
-  for (int i = 0; i < size - 1; i++) {
-    if (input[i] == input[i+1]) {
-      return i;
+template<class ForwardIt, class BinaryPredicate>
+constexpr ForwardIt adjacent_find(ForwardIt first, ForwardIt last, 
+                        BinaryPredicate p)
+{
+    if (first == last) {
+        return last;
     }
-  }
-  return size;
+    ForwardIt next = first;
+    ++next;
+    for (; next != last; ++next, ++first) {
+        if (p(*first, *next)) {
+            return first;
+        }
+    }
+    return last;
 }
 
-// below are all the things I did not implement
-// copy_if
-// (C++11)
-// 	copies a range of elements to a new location
-// (function template)
+template<class ForwardIt>
+constexpr ForwardIt adjacent_find(ForwardIt first, ForwardIt last) {
+  using T = typename std::iterator_traits<ForwardIt>::value_type;
+  return adjacent_find(first, last, [](const T& lhs, const T& rhs) {
+    return lhs == rhs;
+  });
+}
+
+
+template <typename InputIt, typename OutputIt, typename UnaryPredicate>
+constexpr OutputIt copy_if(InputIt first, InputIt last,
+                  OutputIt d_first,
+                  UnaryPredicate pred) {
+  for(; first != last; first++) {
+    if (pred(*first)) {
+      *d_first = *first;
+      d_first++;
+    }
+  }
+  return d_first;
+}
+
+
+template <typename InputIt, typename OutputIt>
+constexpr OutputIt copy(InputIt first, InputIt last,
+                  OutputIt d_first) {
+  return copy_if(first, last, d_first, [](const auto& val) {
+    return true;
+  });
+}
+
 // copy_n
 // (C++11)
 // 	copies a number of elements to a new location
 // (function template)
+
 // copy_backward
 // 	copies a range of elements in backwards order
 // (function template)
+
 // move
 // (C++11)
 // 	moves a range of elements to a new location
 // (function template)
+
 // move_backward
 // (C++11)
 // 	moves a range of elements to a new location in backwards order
 // (function template)
+
 // fill
 // 	copy-assigns the given value to every element in a range
+
 // (function template)
 // fill_n
 // 	copy-assigns the given value to N elements in a range
 // (function template)
+
 // transform
 // 	applies a function to a range of elements
 // (function template)
+
 // generate
-// 	assigns the results of successive function calls to every element in a range
+// 	assigns the results of successive function calls to every element in a
+// range
+
 // (function template)
 // generate_n
-// 	assigns the results of successive function calls to N elements in a range
+// 	assigns the results of successive function calls to N elements in a
+// range
 // (function template)
 // removeremove_if
 // 	removes elements satisfying specific criteria
@@ -192,7 +240,8 @@ constexpr size_t adjacent_find(const std::array<T, size>& input) {
 // 	replaces all values satisfying specific criteria with another value
 // (function template)
 // replace_copyreplace_copy_if
-// 	copies a range, replacing elements satisfying specific criteria with another value
+// 	copies a range, replacing elements satisfying specific criteria with
+// another value
 // (function template)
 // swap
 // 	swaps the values of two objects
@@ -215,6 +264,7 @@ constexpr size_t adjacent_find(const std::array<T, size>& input) {
 // rotate_copy
 // 	copies and rotate a range of elements
 // (function template)
+
 // random_shuffleshuffle
 // (until C++17)(C++11)
 // 	randomly re-orders elements in a range
@@ -227,7 +277,8 @@ constexpr size_t adjacent_find(const std::array<T, size>& input) {
 // 	removes consecutive duplicate elements in a range
 // (function template)
 // unique_copy
-// 	creates a copy of some range of elements that contains no consecutive duplicates
+// 	creates a copy of some range of elements that contains no consecutive
+// duplicates
 // (function template)
 // Partitioning operations
 // Defined in header <algorithm>
@@ -251,10 +302,45 @@ constexpr size_t adjacent_find(const std::array<T, size>& input) {
 // (function template)
 // Sorting operations
 // Defined in header <algorithm>
+
 // is_sorted
 // (C++11)
 // 	checks whether a range is sorted into ascending order
 // (function template)
+
+// There seems to be some issue with <functional>, so I am going to
+// implement my own
+
+template<typename Comparator, typename T>
+struct ReverseComparator {
+  constexpr ReverseComparator(Comparator compare): compare_(compare) {}
+  constexpr bool operator()(const T& lhs, const T& rhs) {
+    return compare_(rhs, lhs);
+  }
+
+  Comparator compare_;
+};
+
+template <class ForwardIt, class Compare>
+constexpr ForwardIt is_sorted_until(ForwardIt first, ForwardIt last, Compare comp) {
+  using T = typename std::iterator_traits<ForwardIt>::value_type;
+  ForwardIt it = adjacent_find(first, last, ReverseComparator<Compare, T>(comp));
+  return it == last ? last : ++it;
+}
+
+template< class ForwardIt, class Compare>
+constexpr bool is_sorted(ForwardIt first, ForwardIt last, Compare comp) {
+  return is_sorted_until(first, last, comp) == last;  
+}
+
+template< class ForwardIt>
+constexpr bool is_sorted(ForwardIt first, ForwardIt last) {
+  using T = typename std::iterator_traits<ForwardIt>::value_type;
+  return is_sorted_until(first, last, [](const T& lhs, const T& rhs){
+    return lhs <= rhs;
+  }) == last;  
+}
+
 // is_sorted_until
 // (C++11)
 // 	finds the largest sorted subrange
@@ -272,7 +358,8 @@ constexpr size_t adjacent_find(const std::array<T, size>& input) {
 // 	sorts a range of elements while preserving order between equal elements
 // (function template)
 // nth_element
-// 	partially sorts the given range making sure that it is partitioned by the given element
+// 	partially sorts the given range making sure that it is partitioned by
+// the given element
 // (function template)
 // Binary search operations (on sorted ranges)
 // Defined in header <algorithm>
@@ -367,10 +454,12 @@ constexpr size_t adjacent_find(const std::array<T, size>& input) {
 // 	determines if a sequence is a permutation of another sequence
 // (function template)
 // next_permutation
-// 	generates the next greater lexicographic permutation of a range of elements
+// 	generates the next greater lexicographic permutation of a range of
+// elements
 // (function template)
 // prev_permutation
-// 	generates the next smaller lexicographic permutation of a range of elements
+// 	generates the next smaller lexicographic permutation of a range of
+// elements
 // (function template)
 // Numeric operations
 // Defined in header <numeric>
@@ -396,11 +485,13 @@ constexpr size_t adjacent_find(const std::array<T, size>& input) {
 // (function template)
 // exclusive_scan
 // (C++17)
-// 	similar to std::partial_sum, excludes the ith input element from the ith sum
+// 	similar to std::partial_sum, excludes the ith input element from the ith
+// sum
 // (function template)
 // inclusive_scan
 // (C++17)
-// 	similar to std::partial_sum, includes the ith input element in the ith sum
+// 	similar to std::partial_sum, includes the ith input element in the ith
+// sum
 // (function template)
 // transform_reduce
 // (C++17)
@@ -414,5 +505,4 @@ constexpr size_t adjacent_find(const std::array<T, size>& input) {
 // (C++17)
 // 	applies a functor, then calculates inclusive scan
 // (function template)
-
 }
